@@ -5,7 +5,7 @@ Uso:
     python scripts/cargar_datos_demo.py                      # http://localhost:8210
     python scripts/cargar_datos_demo.py --url https://tu-dominio --admin-pass '...'
 
-Es idempotente: si ya existen las empresas/viajes de ejemplo, no los duplica.
+Es idempotente: no duplica empresas ni viajes, y retoma los que quedaron a medias.
 Solo usa la librería estándar.
 """
 import argparse
@@ -79,15 +79,29 @@ def main():
         companies.append({"id": c["id"], "name": name, "qr": labels})
         print(f"  empresa: {name} ({'existente' if name in existing else 'creada'})")
 
-    done_vehicles = {t["vehicle"] for t in api.call("GET", "/trips", user="admin")}
+    existing_trips = {t["vehicle"]: t for t in api.call("GET", "/trips", user="admin")}
     for vehicle, collector, bags, final in TRIPS:
-        if vehicle in done_vehicles:
-            print(f"  viaje {vehicle}: ya existe, se omite")
+        trip = existing_trips.get(vehicle)
+        if trip is None:
+            trip = api.call("POST", "/trips", {"vehicle": vehicle, "collector_name": collector}, user="collector")
+            state = "creado"
+        elif trip["status"] == "closed":
+            print(f"  viaje {trip['route_code']} ({vehicle}): ya cerrado, se omite")
             continue
-        trip = api.call("POST", "/trips", {"vehicle": vehicle, "collector_name": collector}, user="collector")
+        else:
+            state = "retomado"
         tid = trip["id"]
+
+        # Cuántas bolsas hay ya por empresa+color, para completar solo lo que falta.
+        rows = api.call("GET", f"/trips/{tid}/manifest", user="admin")["rows"]
+        have = {(r["company_id"], r["color"]): (r["pickup_count"], r["weighed_count"]) for r in rows}
+
         for idx, color, n in bags:
-            for _ in range(n):
+            cid = companies[idx]["id"]
+            picked, _ = have.get((cid, color), (0, 0))
+            if picked and trip["status"] != "open":
+                continue  # retiros congelados una vez que la planta empezó
+            for _ in range(max(0, n - picked)):
                 api.call("POST", f"/trips/{tid}/scan", {
                     "qr_payload": companies[idx]["qr"][color], "stage": "pickup",
                     "client_event_id": str(uuid.uuid4()),
@@ -95,21 +109,23 @@ def main():
 
         if final in ("closed", "partial"):
             for i, (idx, color, n) in enumerate(bags):
+                cid = companies[idx]["id"]
                 # En "partial" la última línea queda sin pesar y la anterior a medias.
-                to_weigh = n
+                target = n
                 if final == "partial" and i == len(bags) - 1:
-                    to_weigh = 0
+                    target = 0
                 elif final == "partial" and i == len(bags) - 2:
-                    to_weigh = max(1, n - 1)
-                for _ in range(to_weigh):
+                    target = max(1, n - 1)
+                _, weighed = have.get((cid, color), (0, 0))
+                for _ in range(max(0, target - weighed)):
                     api.call("POST", f"/trips/{tid}/weighings", {
-                        "qr_payload": companies[idx]["qr"][color], "company_id": companies[idx]["id"],
+                        "qr_payload": companies[idx]["qr"][color], "company_id": cid,
                         "weight_kg": f"{rng.uniform(2.5, 18.0):.3f}",
                         "client_event_id": str(uuid.uuid4()),
                     }, user="plant")
         if final == "closed":
             api.call("POST", f"/trips/{tid}/close", user="admin")
-        print(f"  viaje {trip['route_code']} ({vehicle}): {final}")
+        print(f"  viaje {trip['route_code']} ({vehicle}): {state} -> {final}")
 
     print("Listo.")
 
