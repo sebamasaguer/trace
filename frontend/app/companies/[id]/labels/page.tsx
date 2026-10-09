@@ -19,5 +19,6 @@ export default function LabelsPage() {
     <div className="label-grid">
       {labels.map(label => { const meta = colorMeta[label.color]; return <div className={`qr-label ${meta.className}`} key={label.id}><div className="qr-color-band">{meta.label.toUpperCase()}</div><div className="qr-company"><span>EMPRESA</span><h2>{company?.name || "Cliente"}</h2><p>{company?.site_name || ""}</p></div><img src={label.qr_data_uri} alt={`QR ${meta.label}`}/><div className="qr-data"><b>{label.material_name}</b><span>{label.public_code}</span><small>Escanear una vez por cada bolsa</small></div></div>; })}
     </div>
+    <div className="rt-labels-mobile-print no-print"><button className="primary-btn wide" type="button" onClick={() => window.print()}><Printer size={18}/> Imprimir o guardar como PDF</button><p>Las tres etiquetas son permanentes. Imprimí las copias que necesites; no generes códigos nuevos para cada bolsa.</p></div>
   </div></AppShell>;
 }

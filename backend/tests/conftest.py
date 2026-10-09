@@ -1,9 +1,12 @@
 import os
+import tempfile
 
 # Debe fijarse antes de importar la app: Settings se construye al importar.
 os.environ["SECRET_KEY"] = "test-session-secret-0123456789abcdef"
 os.environ["QR_SECRET_KEY"] = "test-qr-secret-fedcba9876543210"
-os.environ["DATABASE_URL"] = "sqlite://"
+# Archivo (no :memory:) para que el engine global de la app sea compartible entre hilos;
+# los tests con fixtures usan su propio engine vía dependency_overrides.
+os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mkdtemp(prefix='recicla-tests-')}/app.sqlite3"
 
 import itertools
 
@@ -91,7 +94,7 @@ def world(client, auth):
     def event_id():
         return f"evt-{next(counter):06d}"
 
-    def scan(stage, color="verde", role=None, event=None, trip_id=None):
+    def scan(stage="pickup", color="verde", role=None, event=None, trip_id=None):
         role = role or ("collector" if stage == "pickup" else "plant")
         return client.post(
             f"/api/v1/trips/{trip_id or w.trip_id}/scan",
@@ -99,11 +102,16 @@ def world(client, auth):
             headers=auth[role],
         )
 
-    def weigh(color="verde", kg="10.5", event=None):
+    def weigh(color="verde", kg="10.5", event=None, company_id=None, role="plant"):
         return client.post(
             f"/api/v1/trips/{w.trip_id}/weighings",
-            json={"qr_payload": qr[color], "weight_kg": kg, "client_event_id": event or event_id()},
-            headers=auth["plant"],
+            json={
+                "qr_payload": qr[color],
+                "company_id": company_id or w.company_id,
+                "weight_kg": kg,
+                "client_event_id": event or event_id(),
+            },
+            headers=auth[role],
         )
 
     def close(role="admin", force=False):

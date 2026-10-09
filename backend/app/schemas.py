@@ -94,6 +94,7 @@ class ScanResult(BaseModel):
 
 class WeighingCreate(BaseModel):
     qr_payload: str
+    company_id: int = Field(gt=0, description="Empresa seleccionada para esta sesión de pesaje")
     weight_kg: Decimal = Field(gt=0, le=10000)
     client_event_id: str = Field(min_length=8, max_length=80)
 

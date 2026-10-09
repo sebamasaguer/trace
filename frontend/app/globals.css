@@ -61,3 +61,75 @@ body.mobile-menu-open{overflow:hidden;overscroll-behavior:none}
   .mobile-user-card span{font-size:10px;color:#9fb8ae;margin-top:2px}
   .mobile-logout{width:100%;min-height:46px;border:1px solid rgba(255,255,255,.11);border-radius:12px;background:rgba(255,255,255,.055);color:#d8e6e1;display:flex;align-items:center;justify-content:center;gap:9px;font-weight:750;cursor:pointer}
 }
+
+/* v0.1.7 — Planta unificada y reportería */
+.rt-plant-action{margin-bottom:18px}
+.rt-weigh-entry{margin-top:17px;display:flex;flex-direction:column;gap:14px;padding:17px;border:1px solid #c9e9d8;border-radius:15px;background:linear-gradient(140deg,#f6fcf9,#fff)}
+.rt-weigh-entry>label,.rt-report-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#425149}
+.rt-weigh-bag{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.rt-weigh-bag>div{display:flex;flex-direction:column;gap:4px}
+.rt-weigh-bag small{color:var(--muted);padding-left:16px}
+.rt-weigh-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.rt-four-col{grid-template-columns:1.6fr .9fr .8fr 1.2fr;min-width:610px}
+.rt-table-scroll{overflow-x:auto;scrollbar-width:thin}
+.rt-report-filters{display:grid;grid-template-columns:minmax(170px,1.7fr) minmax(120px,.8fr) minmax(165px,1fr) auto;align-items:end;gap:14px;margin-bottom:18px}
+.rt-report-export{display:flex;gap:8px;flex-wrap:wrap}
+.rt-report-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:24px 0 14px}
+.rt-report-title h2{font-size:22px;letter-spacing:-.6px;margin:6px 0}
+.rt-report-title p{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:var(--muted)}
+.rt-report-color-row{grid-template-columns:1.6fr .9fr .9fr 1.1fr .9fr;min-width:620px}
+.rt-report-timeline-row{grid-template-columns:1.2fr 1fr 1.4fr 1fr;min-width:550px}
+.rt-report-kpis{grid-template-columns:repeat(3,1fr)}
+.rt-chart-panel{margin-top:18px}
+.rt-chart-list{display:flex;flex-direction:column;gap:10px;max-height:360px;overflow:auto;padding-right:8px}
+.rt-chart-row{display:grid;grid-template-columns:92px 1fr 116px;gap:14px;align-items:center;font-size:12px}
+.rt-chart-row>span{color:var(--muted);font-variant-numeric:tabular-nums}
+.rt-chart-row>strong{text-align:right;font-variant-numeric:tabular-nums;font-size:11px}
+.rt-chart-track{height:10px;background:#edf4ef;border-radius:20px;overflow:hidden}
+.rt-chart-fill{height:100%;border-radius:20px;background:linear-gradient(90deg,#0f8966,#39c492)}
+.rt-report-page .table-panel{margin-bottom:18px}
+.rt-report-footnote{font-size:12px;color:var(--muted);line-height:1.6;padding:8px 0 18px}
+.rt-report-message{color:var(--muted);text-align:center;padding:28px}
+@media(max-width:950px){.rt-report-filters{grid-template-columns:1fr 1fr}.rt-report-export{grid-column:span 2}.rt-report-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){.rt-report-filters{grid-template-columns:1fr}.rt-report-export{grid-column:auto}.rt-report-export>button{flex:1}.rt-report-kpis{grid-template-columns:1fr}.rt-chart-row{grid-template-columns:79px 1fr 100px;gap:7px}.rt-chart-row>strong{font-size:10px}.rt-weigh-bag{flex-direction:column;align-items:flex-start}.rt-weigh-actions{justify-content:stretch}.rt-weigh-actions>button{flex:1}}
+@media print{
+  body,.app-shell,.main-area{background:white!important;color:#111!important}
+  .sidebar,.mobile-top,.mobile-nav-overlay,.mobile-drawer,.no-print,.rt-chart-panel{display:none!important}
+  .app-shell{display:block!important}.page-wrap{padding:8px!important;max-width:100%!important}
+  .panel,.kpi-card{break-inside:avoid;box-shadow:none!important}.rt-chart-panel{display:none!important}
+  .rt-table-scroll{overflow:visible!important}.tr{min-width:0!important}
+  .rt-report-footnote{font-size:10px}
+}
+
+
+/* v0.1.8 - Pesaje por empresa activa y acciones QR accesibles en móvil */
+.rt-company-focus-panel{margin-bottom:18px;display:flex;flex-direction:column;gap:10px;border-color:#cfe4d8}
+.rt-company-focus-panel>.select-label{font-weight:800;color:#244b3a}
+.rt-company-focus-select{width:100%;min-height:48px;padding:11px 12px;border-radius:11px;border:1px solid #a9d3bd;background:white;font-weight:650;color:#1b3b2e}
+.rt-active-company{display:flex;align-items:flex-start;gap:12px;padding:13px 15px;border-radius:12px;background:#e9f7ef;color:#0b6044}
+.rt-active-company>span{display:flex;flex-direction:column;gap:3px;font-size:10px;letter-spacing:.7px;font-weight:850}
+.rt-active-company strong{font-size:18px;letter-spacing:0;color:#12392b;overflow-wrap:anywhere}
+.rt-active-company small{font-size:12px;line-height:1.35;letter-spacing:0;font-weight:500;color:#375d4e}
+.rt-companies-mobile,.rt-labels-mobile-print{display:none}
+@media(max-width:760px){
+ .rt-companies-panel{padding:16px}
+ .rt-companies-desktop{display:none}
+ .rt-companies-mobile{display:grid;gap:12px}
+ .rt-company-mobile-card{min-width:0;background:#fff;border:1px solid #e0e9e3;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 7px 18px rgba(16,70,48,.04)}
+ .rt-company-mobile-title{display:flex;align-items:center;gap:9px;color:#155842;min-width:0}
+ .rt-company-mobile-title strong{font-size:16px;overflow-wrap:anywhere;color:#152d23}
+ .rt-company-mobile-card p{font-size:12px;overflow-wrap:anywhere}
+ .rt-company-mobile-meta{display:flex;align-items:center;gap:8px}
+ .rt-company-mobile-action{width:100%;min-height:48px;font-size:14px}
+ .rt-empty-companies{font-size:13px;color:#66736c}
+ .rt-labels-mobile-print{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+ .rt-labels-mobile-print p{font-size:12px;color:#66736c;line-height:1.4}
+ .page-header>button.primary-btn{width:100%;min-height:48px}
+ .rt-company-focus-select{font-size:16px}
+}
+
+@media(max-width:760px){
+ .rt-table-scroll .tr.rt-four-col{grid-template-columns:1.6fr .9fr .8fr 1.2fr;min-width:610px}
+ .rt-table-scroll .tr.rt-four-col>div:nth-child(n+4){display:block}
+ .rt-table-scroll .tr.rt-four-col.th>div:nth-child(n+4){display:block}
+}
