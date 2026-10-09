@@ -13,7 +13,7 @@ from app.models import QrLabel
 def make_qr_token(label: QrLabel) -> str:
     return jwt.encode(
         {"typ": "recycle_label", "label_id": label.id, "code": label.public_code},
-        settings.secret_key,
+        settings.qr_key,
         algorithm="HS256",
     )
 
@@ -46,7 +46,7 @@ def extract_token(payload: str) -> str:
 def resolve_label(db: Session, payload: str) -> QrLabel:
     token = extract_token(payload)
     try:
-        data = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        data = jwt.decode(token, settings.qr_key, algorithms=["HS256"])
         if data.get("typ") != "recycle_label":
             raise ValueError("wrong type")
         label_id = int(data["label_id"])

@@ -57,6 +57,13 @@ Los QR impresos contienen un token firmado independiente de host/puerto. Los QR 
 
 > El proyecto se entrega con claves de demostración. Para producción deben cambiarse el `SECRET_KEY`, contraseñas, políticas de CORS y credenciales de PostgreSQL.
 
+### Claves y tests
+
+- `SECRET_KEY` es obligatorio: la API no arranca con el valor de ejemplo ni con menos de 16 caracteres. Los QR se firman con una clave aparte (`QR_SECRET_KEY`; si se omite se deriva de `SECRET_KEY`). **Cambiar cualquiera de las dos claves invalida los QR ya impresos.**
+- Un viaje solo admite retiros mientras está `open`; cuando la planta recibe la primera bolsa pasa a `arrived` y el manifiesto de retiro queda congelado.
+- `POST /trips/{id}/close` devuelve 409 si el viaje ya está cerrado o si retiro, recepción y pesaje no coinciden por empresa/color. Admin y supervisor pueden forzar el cierre con `?force=true`.
+- Tests: `cd backend && pip install -r requirements-dev.txt && pytest`.
+
 ## Guion recomendado para la presentación
 
 1. Ingresar como `admin`.

@@ -19,6 +19,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://recicla:recicla@db:5432/recicla
       SECRET_KEY: demo-secret-change-in-production-7f4b1a9d
+      QR_SECRET_KEY: demo-qr-secret-change-in-production-3c8e52f1
       CORS_ORIGINS: "http://localhost:${RECICLA_FRONTEND_PORT:-3210}"
     ports:
       - "${RECICLA_BACKEND_PORT:-8210}:8100"

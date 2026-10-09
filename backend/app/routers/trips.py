@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -46,6 +47,91 @@ def _scan_progress(db: Session, trip_id: int, label_id: int, stage: ScanStage) -
     return plant_count, pickup_count, max(0, pickup_count - plant_count)
 
 
+def _find_scan(db: Session, client_event_id: str) -> ScanEvent | None:
+    return db.scalar(select(ScanEvent).where(ScanEvent.client_event_id == client_event_id))
+
+
+def _find_weighing(db: Session, client_event_id: str) -> Weighing | None:
+    return db.scalar(select(Weighing).where(Weighing.client_event_id == client_event_id))
+
+
+def _scan_result_from_event(db: Session, event: ScanEvent) -> ScanResult:
+    label = event.label
+    registered, limit, remaining = _scan_progress(db, event.trip_id, label.id, event.stage)
+    return ScanResult(
+        event_id=event.id,
+        company_name=label.company.name,
+        color=label.color,
+        material_name=label.material_name,
+        stage=event.stage,
+        scanned_at=event.scanned_at,
+        registered_count=registered,
+        limit_count=limit,
+        remaining_count=remaining,
+    )
+
+
+def _weighing_result_from_existing(db: Session, weighing: Weighing) -> WeighingResult:
+    label = weighing.label
+    received_count = _scan_count(db, weighing.trip_id, label.id, ScanStage.plant)
+    weighed_count = _weighing_count(db, weighing.trip_id, label.id)
+    return WeighingResult(
+        weighing_id=weighing.id,
+        company_name=label.company.name,
+        color=label.color,
+        material_name=label.material_name,
+        weight_kg=weighing.weight_kg,
+        weighed_at=weighing.weighed_at,
+        weighed_count=weighed_count,
+        limit_count=received_count,
+        remaining_count=max(0, received_count - weighed_count),
+    )
+
+
+def _lock_label(db: Session, payload: str) -> QrLabel:
+    """Resuelve el QR y toma un bloqueo pesimista por EMPRESA+COLOR.
+
+    Debe llamarse ANTES de consultar duplicados y cupos: así dos peticiones
+    concurrentes (incluido un reintento con el mismo client_event_id) quedan
+    serializadas y la segunda ve el evento ya confirmado por la primera.
+    """
+    label = resolve_label(db, payload)
+    locked = db.scalar(select(QrLabel).where(QrLabel.id == label.id).with_for_update())
+    if not locked:
+        raise HTTPException(status_code=404, detail="QR no encontrado")
+    return locked
+
+
+def _reconciliation_issues(db: Session, trip_id: int) -> list[str]:
+    """Etiquetas del viaje cuyo retiro, recepción y pesaje no coinciden."""
+    counts: dict[int, dict[str, int]] = {}
+    scan_rows = db.execute(
+        select(ScanEvent.qr_label_id, ScanEvent.stage, func.count(ScanEvent.id))
+        .where(ScanEvent.trip_id == trip_id)
+        .group_by(ScanEvent.qr_label_id, ScanEvent.stage)
+    ).all()
+    for label_id, stage, total in scan_rows:
+        counts.setdefault(label_id, {"pickup": 0, "plant": 0, "weighed": 0})[stage.value] = total
+    weigh_rows = db.execute(
+        select(Weighing.qr_label_id, func.count(Weighing.id))
+        .where(Weighing.trip_id == trip_id)
+        .group_by(Weighing.qr_label_id)
+    ).all()
+    for label_id, total in weigh_rows:
+        counts.setdefault(label_id, {"pickup": 0, "plant": 0, "weighed": 0})["weighed"] = total
+
+    bad = {lid: c for lid, c in counts.items() if not (c["pickup"] == c["plant"] == c["weighed"])}
+    if not bad:
+        return []
+    labels = db.scalars(select(QrLabel).where(QrLabel.id.in_(bad))).all()
+    issues = [
+        f"{l.company.name} ({l.color.value}): retiradas {bad[l.id]['pickup']}, "
+        f"recibidas {bad[l.id]['plant']}, pesadas {bad[l.id]['weighed']}"
+        for l in sorted(labels, key=lambda l: (l.company.name, l.color.value))
+    ]
+    return issues
+
+
 @router.get("", response_model=list[TripOut])
 def list_trips(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return list(db.scalars(select(Trip).order_by(Trip.started_at.desc()).limit(100)).all())
@@ -87,31 +173,20 @@ def scan_bag(
     if body.stage == ScanStage.plant and user.role not in {UserRole.admin, UserRole.plant, UserRole.supervisor}:
         raise HTTPException(status_code=403, detail="Este usuario no puede registrar recepción en planta")
 
-    duplicate = db.scalar(select(ScanEvent).where(ScanEvent.client_event_id == body.client_event_id))
+    label = _lock_label(db, body.qr_payload)
+    db.refresh(trip)  # el estado pudo cambiar mientras se esperaba el bloqueo
+
+    # Con el bloqueo tomado, el chequeo de idempotencia ya no compite con otra petición.
+    duplicate = _find_scan(db, body.client_event_id)
     if duplicate:
-        label = duplicate.label
-        registered, limit, remaining = _scan_progress(db, trip_id, label.id, duplicate.stage)
-        return ScanResult(
-            event_id=duplicate.id,
-            company_name=label.company.name,
-            color=label.color,
-            material_name=label.material_name,
-            stage=duplicate.stage,
-            scanned_at=duplicate.scanned_at,
-            registered_count=registered,
-            limit_count=limit,
-            remaining_count=remaining,
+        return _scan_result_from_event(db, duplicate)
+
+    # Una vez que la planta empezó a recibir (arrived) el manifiesto de retiro queda congelado.
+    if body.stage == ScanStage.pickup and trip.status != TripStatus.open:
+        raise HTTPException(
+            status_code=409,
+            detail="El viaje ya está en recepción de planta: no se pueden registrar más retiros",
         )
-
-    label = resolve_label(db, body.qr_payload)
-
-    # Bloqueo pesimista por EMPRESA+COLOR. Evita que dos celulares concurrentes
-    # superen el cupo de recepción o pesaje en una carrera count -> insert.
-    label = db.scalar(
-        select(QrLabel).where(QrLabel.id == label.id).with_for_update()
-    )
-    if not label:
-        raise HTTPException(status_code=404, detail="QR no encontrado")
 
     limit_count: int | None = None
     remaining_count: int | None = None
@@ -145,7 +220,15 @@ def scan_bag(
         scanned_by=user.full_name,
     )
     db.add(event)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Red de seguridad: otra petición con el mismo client_event_id ganó la carrera.
+        db.rollback()
+        existing = _find_scan(db, body.client_event_id)
+        if existing:
+            return _scan_result_from_event(db, existing)
+        raise
     db.refresh(event)
 
     return ScanResult(
@@ -174,29 +257,11 @@ def register_weight(
     if trip.status == TripStatus.closed:
         raise HTTPException(status_code=409, detail="El viaje está cerrado")
 
-    duplicate = db.scalar(select(Weighing).where(Weighing.client_event_id == body.client_event_id))
-    if duplicate:
-        label = duplicate.label
-        received_count = _scan_count(db, trip_id, label.id, ScanStage.plant)
-        weighed_count = _weighing_count(db, trip_id, label.id)
-        return WeighingResult(
-            weighing_id=duplicate.id,
-            company_name=label.company.name,
-            color=label.color,
-            material_name=label.material_name,
-            weight_kg=duplicate.weight_kg,
-            weighed_at=duplicate.weighed_at,
-            weighed_count=weighed_count,
-            limit_count=received_count,
-            remaining_count=max(0, received_count - weighed_count),
-        )
+    label = _lock_label(db, body.qr_payload)
 
-    label = resolve_label(db, body.qr_payload)
-    label = db.scalar(
-        select(QrLabel).where(QrLabel.id == label.id).with_for_update()
-    )
-    if not label:
-        raise HTTPException(status_code=404, detail="QR no encontrado")
+    duplicate = _find_weighing(db, body.client_event_id)
+    if duplicate:
+        return _weighing_result_from_existing(db, duplicate)
 
     pickup_count = _scan_count(db, trip_id, label.id, ScanStage.pickup)
     received_count = _scan_count(db, trip_id, label.id, ScanStage.plant)
@@ -223,7 +288,14 @@ def register_weight(
         weighed_by=user.full_name,
     )
     db.add(weighing)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_weighing(db, body.client_event_id)
+        if existing:
+            return _weighing_result_from_existing(db, existing)
+        raise
     db.refresh(weighing)
 
     new_weighed_count = weighed_count + 1
@@ -299,12 +371,24 @@ def manifest(trip_id: int, db: Session = Depends(get_db), _: User = Depends(get_
 @router.post("/{trip_id}/close", response_model=TripOut)
 def close_trip(
     trip_id: int,
+    force: bool = Query(False, description="Cerrar aunque haya diferencias (bolsas faltantes o sin pesar)"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(UserRole.admin, UserRole.supervisor)),
 ):
-    trip = db.get(Trip, trip_id)
+    trip = db.scalar(select(Trip).where(Trip.id == trip_id).with_for_update())
     if not trip:
         raise HTTPException(status_code=404, detail="Viaje no encontrado")
+    if trip.status == TripStatus.closed:
+        raise HTTPException(status_code=409, detail="El viaje ya está cerrado")
+    if not force:
+        issues = _reconciliation_issues(db, trip_id)
+        if issues:
+            shown = "; ".join(issues[:5])
+            extra = f" (y {len(issues) - 5} más)" if len(issues) > 5 else ""
+            raise HTTPException(
+                status_code=409,
+                detail=f"El viaje no está conciliado: {shown}{extra}. Use force=true para cerrar con diferencias.",
+            )
     trip.status = TripStatus.closed
     trip.closed_at = now_utc()
     db.commit()
