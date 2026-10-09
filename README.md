@@ -128,3 +128,18 @@ recicla-trace/
 ## Evolución a producción
 
 Para pasar del MVP de presentación a producción se recomienda agregar: Alembic para migraciones versionadas; almacenamiento de auditoría append-only; refresh tokens o integración SSO; HTTPS/reverse proxy; observabilidad; copias de seguridad; modo offline con cola local; sincronización controlada; catálogo configurable de residuos; integración con balanza; geolocalización opcional de recorridos; certificados PDF y firma digital; multi-sucursal; métricas y alertas.
+
+## Cambios v0.1.7 — Planta y reportes
+
+- **Planta**: escanear QR → cargar peso → confirmar. En una misma confirmación se reciben y pesan las bolsas. La pantalla no tiene una etapa de recepción separada.
+- **Reportes por empresa** (`/reports`): filtro empresa y día, semana (lunes a domingo), mes o año. Vista por colores y evolución temporal, exportación CSV e impresión/PDF.
+- **Trazabilidad por viaje** (`/tracing`): comparación contra lo recolectado.
+- Los reportes aplican hora oficial de Salta, UTC−3. Las cantidades recolectadas y pesadas se agrupan por su propia fecha de operación.
+- Sin migración de base de datos. El histórico de recepciones de versiones anteriores permanece disponible.
+
+Para iniciar desde el celular: `./INICIAR_DEMO_MOVIL.ps1` en PowerShell (`\.\INICIAR_DEMO_MOVIL.ps1`). El túnel público es exclusivamente para la demostración con datos de prueba.
+
+
+## v0.1.8 - Control por empresa
+
+Seleccionar una empresa al iniciar el pesaje; los QR de otras empresas se rechazan en la API. Las acciones QR se muestran como tarjetas en pantallas móviles. Ver `PRUEBA_GOLDEN_v0.1.8.md`.

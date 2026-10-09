@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -37,13 +38,9 @@ def _weighing_count(db: Session, trip_id: int, label_id: int) -> int:
 
 
 def _scan_progress(db: Session, trip_id: int, label_id: int, stage: ScanStage) -> tuple[int, int | None, int | None]:
-    if stage == ScanStage.pickup:
-        registered = _scan_count(db, trip_id, label_id, ScanStage.pickup)
-        return registered, None, None
-
-    pickup_count = _scan_count(db, trip_id, label_id, ScanStage.pickup)
-    plant_count = _scan_count(db, trip_id, label_id, ScanStage.plant)
-    return plant_count, pickup_count, max(0, pickup_count - plant_count)
+    # Sólo existe la lectura operativa de retiro; "plant" permanece en DB
+    # exclusivamente para trazabilidad de registros históricos/integrados.
+    return _scan_count(db, trip_id, label_id, ScanStage.pickup), None, None
 
 
 @router.get("", response_model=list[TripOut])
@@ -84,11 +81,14 @@ def scan_bag(
         raise HTTPException(status_code=409, detail="El viaje está cerrado")
     if body.stage == ScanStage.pickup and user.role not in {UserRole.admin, UserRole.collector, UserRole.supervisor}:
         raise HTTPException(status_code=403, detail="Este usuario no puede registrar retiros")
-    if body.stage == ScanStage.plant and user.role not in {UserRole.admin, UserRole.plant, UserRole.supervisor}:
-        raise HTTPException(status_code=403, detail="Este usuario no puede registrar recepción en planta")
+    # v0.1.7: no existe una recepción independiente. El pesaje registra ambas acciones.
+    if body.stage == ScanStage.plant:
+        raise HTTPException(status_code=409, detail="La recepción se registra junto con el pesaje. Utilizá Planta y pesaje.")
 
     duplicate = db.scalar(select(ScanEvent).where(ScanEvent.client_event_id == body.client_event_id))
     if duplicate:
+        if duplicate.trip_id != trip_id or duplicate.stage != body.stage:
+            raise HTTPException(status_code=409, detail="Identificador de lectura utilizado en otra operación")
         label = duplicate.label
         registered, limit, remaining = _scan_progress(db, trip_id, label.id, duplicate.stage)
         return ScanResult(
@@ -113,29 +113,10 @@ def scan_bag(
     if not label:
         raise HTTPException(status_code=404, detail="QR no encontrado")
 
+    # Sin máximo preconfigurado: el recolector suma tantas bolsas como retire.
+    registered_count = _scan_count(db, trip_id, label.id, ScanStage.pickup) + 1
     limit_count: int | None = None
     remaining_count: int | None = None
-
-    if body.stage == ScanStage.plant:
-        pickup_count = _scan_count(db, trip_id, label.id, ScanStage.pickup)
-        plant_count = _scan_count(db, trip_id, label.id, ScanStage.plant)
-
-        if pickup_count == 0:
-            raise HTTPException(status_code=409, detail="Este QR no tiene bolsas declaradas por el recolector en este viaje")
-        if plant_count >= pickup_count:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Cupo completo: ya se verificaron {plant_count} de {pickup_count} bolsas para este QR",
-            )
-        if trip.status == TripStatus.open:
-            trip.status = TripStatus.arrived
-            trip.arrived_at = now_utc()
-
-        limit_count = pickup_count
-        registered_count = plant_count + 1
-        remaining_count = max(0, pickup_count - registered_count)
-    else:
-        registered_count = _scan_count(db, trip_id, label.id, ScanStage.pickup) + 1
 
     event = ScanEvent(
         trip_id=trip_id,
@@ -174,9 +155,21 @@ def register_weight(
     if trip.status == TripStatus.closed:
         raise HTTPException(status_code=409, detail="El viaje está cerrado")
 
+    # Validación de empresa antes de cualquier lectura/escritura.
+    # El manifiesto puede contener varias empresas; el operario debe
+    # seleccionar explícitamente la que está pesando.
+    label = resolve_label(db, body.qr_payload)
+    if label.company_id != body.company_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"EMPRESA INCORRECTA: este QR corresponde a {label.company.name}. "
+                   "No se registró ninguna bolsa. Seleccioná la empresa correcta.",
+        )
+
     duplicate = db.scalar(select(Weighing).where(Weighing.client_event_id == body.client_event_id))
     if duplicate:
-        label = duplicate.label
+        if duplicate.trip_id != trip_id or duplicate.qr_label_id != label.id or duplicate.weight_kg != body.weight_kg:
+            raise HTTPException(status_code=409, detail="Identificador de operación reutilizado con datos distintos")
         received_count = _scan_count(db, trip_id, label.id, ScanStage.plant)
         weighed_count = _weighing_count(db, trip_id, label.id)
         return WeighingResult(
@@ -191,7 +184,6 @@ def register_weight(
             remaining_count=max(0, received_count - weighed_count),
         )
 
-    label = resolve_label(db, body.qr_payload)
     label = db.scalar(
         select(QrLabel).where(QrLabel.id == label.id).with_for_update()
     )
@@ -203,17 +195,30 @@ def register_weight(
     weighed_count = _weighing_count(db, trip_id, label.id)
 
     if pickup_count == 0:
-        raise HTTPException(status_code=409, detail="Este QR no fue recolectado en este viaje")
-    if received_count == 0:
-        raise HTTPException(status_code=409, detail="Primero debe verificarse esta bolsa en recepción de planta")
-
-    # Límite efectivo: nunca más que lo recolectado y, además, exige recepción previa.
-    effective_limit = min(pickup_count, received_count)
-    if weighed_count >= effective_limit:
+        raise HTTPException(status_code=409, detail="Este QR no tiene bolsas recolectadas en este viaje")
+    if weighed_count >= pickup_count:
         raise HTTPException(
             status_code=409,
-            detail=f"Cupo completo: ya se pesaron {weighed_count} de {effective_limit} bolsas habilitadas para este QR",
+            detail=f"Ya se pesaron {weighed_count} de {pickup_count} bolsas recolectadas de esta empresa y color",
         )
+
+    # Compatibilidad con viajes anteriores a v0.1.7:
+    # si una bolsa ya fue recibida por el flujo histórico, el pesaje completa
+    # ese registro pendiente. En viajes nuevos la recepción y el pesaje se
+    # crean atómicamente. Nunca se contabiliza una bolsa más de una vez.
+    if received_count <= weighed_count:
+        reception = ScanEvent(
+            trip_id=trip_id,
+            qr_label_id=label.id,
+            stage=ScanStage.plant,
+            client_event_id="W:" + hashlib.sha256(body.client_event_id.encode("utf-8")).hexdigest(),
+            scanned_by=user.full_name,
+        )
+        db.add(reception)
+
+    if trip.status == TripStatus.open:
+        trip.status = TripStatus.arrived
+        trip.arrived_at = now_utc()
 
     weighing = Weighing(
         trip_id=trip_id,
@@ -223,6 +228,8 @@ def register_weight(
         weighed_by=user.full_name,
     )
     db.add(weighing)
+    # Los INSERTs comparten el mismo commit: o se registra recepción + peso,
+    # o no se registra ninguno. El lock del QR serializa ambos celulares.
     db.commit()
     db.refresh(weighing)
 
@@ -235,8 +242,8 @@ def register_weight(
         weight_kg=weighing.weight_kg,
         weighed_at=weighing.weighed_at,
         weighed_count=new_weighed_count,
-        limit_count=effective_limit,
-        remaining_count=max(0, effective_limit - new_weighed_count),
+        limit_count=pickup_count,
+        remaining_count=max(0, pickup_count - new_weighed_count),
     )
 
 

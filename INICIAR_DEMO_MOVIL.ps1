@@ -4,7 +4,7 @@ Set-Location $PSScriptRoot
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " RECICLATRACE - DEMO MOVIL HTTPS v0.1.6" -ForegroundColor Cyan
+Write-Host " RECICLATRACE - DEMO MOVIL HTTPS v0.1.7" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {

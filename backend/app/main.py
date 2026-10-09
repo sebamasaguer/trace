@@ -3,12 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import auth, companies, dashboard, trips
+from app.routers import auth, companies, dashboard, trips, reports
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.1.5-demo",
-    description="Trazabilidad de reciclaje por QR, recepción y pesaje.",
+    version="0.1.8-demo",
+    description="Trazabilidad de reciclaje por QR, pesaje con recepción integrada y reportes por empresa.",
 )
 
 app.add_middleware(
@@ -27,10 +27,12 @@ def startup():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": settings.app_name, "version": "0.1.5-demo"}
+    return {"status": "ok", "service": settings.app_name, "version": "0.1.8-demo"}
 
 
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(companies.router, prefix=settings.api_prefix)
 app.include_router(trips.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
+
+app.include_router(reports.router, prefix=settings.api_prefix)

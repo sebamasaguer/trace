@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   Building2,
   ClipboardCheck,
+  BarChart3,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -21,7 +22,8 @@ const items = [
   { href: "/companies", label: "Empresas y QR", icon: Building2 },
   { href: "/operations", label: "Recolección", icon: Route },
   { href: "/plant", label: "Planta y pesaje", icon: Scale },
-  { href: "/reports", label: "Trazabilidad", icon: ClipboardCheck }
+  { href: "/reports", label: "Reportes por empresa", icon: BarChart3 },
+  { href: "/tracing", label: "Trazabilidad", icon: ClipboardCheck }
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
